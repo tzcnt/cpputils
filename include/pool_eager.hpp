@@ -11,9 +11,10 @@
 #include <cassert>
 #include <cstdint>
 
-/// Small object pool that holds 64 objects. All objects are eagerly
-/// initialized. Objects are checked out in a LIFO manner, so that the
-/// most-frequently used objects will remain hot in cache.
+/// Small object pool that holds 64 objects. It uses a 64-bitmap
+/// to track which objects are available; thus it requires a 64-bit machine. All
+/// objects are eagerly initialized. Objects are checked out in a LIFO manner,
+/// so that the most-frequently used objects will remain hot in cache.
 ///
 /// There are 2 usage patterns:
 ///
