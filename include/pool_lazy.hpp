@@ -78,7 +78,7 @@ template <typename T> class BitmapObjectPool {
   // You can derive from this class and override initialize() to customize how
   // new pool objects are created. Overriden implementations must at least
   // construct the object at the pointer location using placement new.
-  virtual void initialize(void* location) { ::new (location) T(); }
+  virtual void initialize(void* location) = 0; // { ::new (location) T(); }
 
 public:
   /// Constructs a new, empty object pool.
@@ -150,7 +150,7 @@ public:
         bits = block->available_bits.fetch_and(~bit);
         // Did we actually get ownership? Or did someone beat us to it?
         if ((bits & bit) != 0) {
-          return ScopedPoolObject{block->objects[idx].value, block, bit};
+          return ScopedPoolObject{block->objects[idx % 64].value, block, bit};
         }
       }
 
@@ -170,10 +170,10 @@ public:
         }
 
         // Construct new object in-place, possibly delegating to derived class
-        initialize(static_cast<void*>(&block->objects[idx].value));
+        initialize(static_cast<void*>(&block->objects[idx % 64].value));
 
         auto bit = ONE_BIT << idx;
-        return ScopedPoolObject{block->objects[idx].value, block, bit};
+        return ScopedPoolObject{block->objects[idx % 64].value, block, bit};
       }
     }
   }
