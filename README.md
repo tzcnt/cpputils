@@ -1,2 +1,3 @@
 # cpputils
-C++ utility classes
+
+High-performance utility classes and data structures.
