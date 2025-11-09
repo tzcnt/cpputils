@@ -11,6 +11,26 @@
 #include <cassert>
 #include <cstdint>
 
+/// Object pool that holds an unlimited number of objects. Objects are lazily
+/// initialized; if all objects are currently checked out, a new one will be
+/// created and returned. Objects are checked out in a LIFO manner, so that the
+/// most-frequently used objects will remain hot in cache.
+///
+/// Manual pattern:
+/// 1. acquire() - check out an object index
+/// 2. get() - retrieve a reference to the object, using the index from
+/// acquire()
+/// 3. release() - return the object to the pool, using the index from acquire()
+///
+/// Modern pattern:
+/// 1. acquire_scoped() - returns an object which wraps a reference to a pool
+/// object, and automatically returns that object to the pool when it goes out
+/// of scope.
+/// 2. access the .value property of the scoped object to use it.
+///
+/// In either case, the references returned are directly to the objects stored
+/// in the pool. Be careful not to accidentally move or copy this object, as
+/// the original object is what will be returned to the pool afterward.
 template <typename T, typename Derived> class BitmapObjectPool {
   // std::optional-like type that allocates space for an object
   // without managing its lifetime.
@@ -50,22 +70,6 @@ public:
     }
   }
 
-protected:
-  bool try_init(uint64_t& idx) {
-    idx = count.load(std::memory_order_relaxed);
-    while (true) {
-      if (idx >= 64) {
-        return false;
-      }
-      if (count.compare_exchange_strong(idx, idx + 1)) {
-        // Use CRTP to delegate initialization to derived class
-        ::new (static_cast<void*>(&objects[idx].value)) T();
-        static_cast<Derived*>(this)->init(objects[idx]);
-        return true;
-      }
-    }
-  }
-
 public:
   // Try to acquire each currently available element of the list one-by-one and
   // run func() on it.
@@ -85,11 +89,15 @@ public:
     }
   }
 
-  bool try_acquire(uint64_t& idx) {
+  uint64_t acquire() {
+    size_t idx;
     auto bits = available_bits.load(std::memory_order_relaxed);
     while (true) {
       if (bits == 0) {
-        return try_init(idx);
+        idx = count.fetch_add(1, std::memory_order_relaxed);
+        // Use CRTP to delegate initialization to derived class
+        ::new (static_cast<void*>(&objects[idx].value)) T();
+        static_cast<Derived*>(this)->init(objects[idx]);
       }
       idx = static_cast<uint64_t>(std::countr_zero(bits));
       auto bit = ONE_BIT << idx;
@@ -99,12 +107,6 @@ public:
         return true;
       }
     }
-  }
-
-  uint64_t acquire() {
-    size_t idx;
-    [[maybe_unused]] bool ok = try_acquire(idx);
-    assert(ok && "All pool objects are in use!");
     return idx;
   }
 
