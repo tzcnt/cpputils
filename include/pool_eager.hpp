@@ -11,7 +11,31 @@
 #include <cassert>
 #include <cstdint>
 
-template <typename T> class BitmapObjectPool {
+/// Small object pool that holds 64 objects. All objects are eagerly
+/// initialized. Objects are checked out in a LIFO manner, so that the
+/// most-frequently used objects will remain hot in cache.
+///
+/// There are 2 usage patterns:
+///
+/// Manual pattern:
+/// 1. acquire() - check out an object index
+/// 2. get() - retrieve a reference to the object, using the index from
+/// acquire()
+/// 3. release() - return the object to the pool, using the index from acquire()
+///
+/// Modern pattern:
+/// 1. acquire_scoped() - returns an object which wraps a reference to a pool
+/// object, and automatically returns that object to the pool when it goes out
+/// of scope.
+/// 2. access the .value property of the scoped object to use it.
+///
+/// In either case, the references returned are directly to the objects stored
+/// in the pool. Be careful not to accidentally move or copy this object, as
+/// the original object is what will be returned to the pool afterward.
+///
+/// This pool holds only 64 objects. Trying to check out more than 64 objects at
+/// once will be an error (assert in debug mode, UB in release mode).
+template <typename T> class BitmapObjectPool64 {
   static constexpr uint64_t ONE_BIT = static_cast<uint64_t>(1);
   std::atomic<uint64_t> available_bits;
   std::array<T, 64> objects;
@@ -19,7 +43,7 @@ template <typename T> class BitmapObjectPool {
 public:
   // This version eagerly default-constructs 64 of the pooled object.
   // Thus it starts with 64 available objects (all bits are 1).
-  BitmapObjectPool() : available_bits{static_cast<uint64_t>(-1)} {}
+  BitmapObjectPool64() : available_bits{static_cast<uint64_t>(-1)} {}
 
   bool try_acquire(uint64_t& idx) {
     auto bits = available_bits.load(std::memory_order_relaxed);
@@ -55,15 +79,15 @@ public:
   T& ref(uint64_t idx) { return objects[idx]; }
 
   class ScopedPoolObject {
-    friend BitmapObjectPool;
+    friend BitmapObjectPool64;
 
   public:
     T& value;
 
   private:
-    BitmapObjectPool& pool;
+    BitmapObjectPool64& pool;
     uint64_t idx;
-    ScopedPoolObject(BitmapObjectPool& Pool, uint64_t Idx)
+    ScopedPoolObject(BitmapObjectPool64& Pool, uint64_t Idx)
         : value{Pool.ref(Idx)}, pool{Pool}, idx{Idx} {}
 
   public:
