@@ -26,7 +26,7 @@
 /// In either case, the references returned are directly to the objects stored
 /// in the pool. Be careful not to accidentally move or copy this object, as
 /// the original object is what will be returned to the pool afterward.
-template <typename T, typename Derived> class BitmapObjectPool {
+template <typename T> class BitmapObjectPool {
   // std::optional-like type that allocates space for an object
   // without managing its lifetime. 64-aligned to prevent false sharing.
   union alignas(64) pool_opt {
@@ -59,34 +59,6 @@ template <typename T, typename Derived> class BitmapObjectPool {
   pool_block data;
   std::atomic<size_t> count;
 
-  // Acquire each currently available object of the list one-by-one and
-  // call func(object). Objects that are currently in use by another thread
-  // will not be processed.
-  template <typename Fn> void for_each_available(Fn func) {
-    auto max = count.load(std::memory_order_relaxed);
-    size_t i = 0;
-    pool_block* block = &data;
-    while (i < max) {
-      auto bit = ONE_BIT << i;
-      // Try to clear this bit to take ownership of the object.
-      // If it was already clear, nothing happens.
-      auto bits = block->available_bits.fetch_and(~bit);
-      if ((bits & bit) != 0) {
-        // We now own this object. Run the caller's functor on it.
-        func(block->objects[i].value);
-        // Now release the object
-        block->available_bits.fetch_or(bit);
-      }
-      ++i;
-      if (i % 64 == 0) {
-        block = block->next;
-        if (block == nullptr) {
-          return;
-        }
-      }
-    }
-  }
-
   // Get or construct the next block.
   pool_block* next_block(pool_block* block) {
     pool_block* next = block->next.load(std::memory_order_acquire);
@@ -103,12 +75,16 @@ template <typename T, typename Derived> class BitmapObjectPool {
     return next;
   }
 
+  // You can derive from this class and override initialize() to customize how
+  // new pool objects are created. Overriden implementations must at least
+  // construct the object at the pointer location using placement new.
+  virtual void initialize(void* location) { ::new (location) T(); }
+
 public:
-  // This version lazily initializes objects as needed.
-  // Thus it starts with 0 available objects (all bits are 0).
+  /// Constructs a new, empty object pool.
   BitmapObjectPool() : count{0} {}
 
-  // Destroy any objects that were used.
+  /// Destroy any objects that were created by the pool.
   ~BitmapObjectPool() {
     size_t i = 0;
     pool_block* block = &data;
@@ -125,6 +101,8 @@ public:
     }
   }
 
+  /// Wrapper to an object pool reference (the .value field).
+  /// When this goes out of scope, the object will be returned to the pool.
   class ScopedPoolObject {
     friend BitmapObjectPool;
 
@@ -142,6 +120,14 @@ public:
       [[maybe_unused]] auto old = block->available_bits.fetch_or(bit);
       assert((old & bit) == 0 && "Released object you didn't own!");
     }
+
+    // Not copyable due to owning a unique checkout of an object.
+    ScopedPoolObject(const ScopedPoolObject&) = delete;
+    ScopedPoolObject& operator=(const ScopedPoolObject&) = delete;
+
+    // This *could* be made movable by setting a sentinel value for the block.
+    ScopedPoolObject(ScopedPoolObject&&) = delete;
+    ScopedPoolObject& operator=(ScopedPoolObject&&) = delete;
   };
 
   // Checks out an object from the pool, and returns a wrapper holding a
@@ -183,34 +169,40 @@ public:
           blockEnd += 64;
         }
 
-        // Construct new object in-place
-        ::new (static_cast<void*>(&block->objects[idx].value)) T();
-        // Use CRTP to delegate custom initialization to derived class
-        static_cast<Derived*>(this)->init(block->objects[idx].value);
+        // Construct new object in-place, possibly delegating to derived class
+        initialize(static_cast<void*>(&block->objects[idx].value));
 
         auto bit = ONE_BIT << idx;
         return ScopedPoolObject{block->objects[idx].value, block, bit};
       }
     }
   }
-};
 
-// CRTP customization to reserve space for any container type
-template <typename C>
-class ContainerPool : public BitmapObjectPool<C, ContainerPool<C>> {
-  friend class BitmapObjectPool<C, ContainerPool<C>>;
-
-  // Implement init() for the container type
-  void init(C& newContainer) { newContainer.reserve(500); }
-
-  // This replaces the need for the map_vector functionality
-  // instead we just process any free maps one-by-one in place
-  void clean() {
-    BitmapObjectPool<C, ContainerPool<C>>::for_each_available([](C& map) {
-      // if (absl::erase_if(map, [](const auto& pair) {
-      //       return pair.second->dwReference == 0;
-      //     }) > 0)
-      //   map.rehash(0);
-    });
+  // Acquire each currently available object of the list one-by-one and
+  // call func(object). Objects that are currently in use by another thread
+  // will not be processed.
+  template <typename Fn> void for_each_available(Fn func) {
+    auto max = count.load(std::memory_order_relaxed);
+    size_t i = 0;
+    pool_block* block = &data;
+    while (i < max) {
+      auto bit = ONE_BIT << i;
+      // Try to clear this bit to take ownership of the object.
+      // If it was already clear, nothing happens.
+      auto bits = block->available_bits.fetch_and(~bit);
+      if ((bits & bit) != 0) {
+        // We now own this object. Run the caller's functor on it.
+        func(block->objects[i].value);
+        // Now release the object
+        block->available_bits.fetch_or(bit);
+      }
+      ++i;
+      if (i % 64 == 0) {
+        block = block->next;
+        if (block == nullptr) {
+          return;
+        }
+      }
+    }
   }
 };
