@@ -1,0 +1,56 @@
+name: coverage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build-and-test:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        PRESET: [clang-linux-debug]
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure
+      run: cmake -G "Unix Makefiles" -DCMD_COMPILE_FLAGS='-fprofile-instr-generate;-fcoverage-mapping' -DCMD_LINK_FLAGS='-Wl,--build-id;-fprofile-instr-generate;-fcoverage-mapping' --preset ${{matrix.PRESET}} .
+    - name: build
+      run: cmake --build ./build/${{matrix.PRESET}} --parallel $(nproc) --target all
+    - name: run tests
+      run: LLVM_PROFILE_FILE=tests.profraw ./build/${{matrix.PRESET}}/tests/tests
+    - name: merge
+      run: |
+        llvm-profdata-18 merge -o coverage.profdata \
+        tests.profraw
+    - name: export
+      run: |
+        llvm-cov-18 export -format=lcov -instr-profile coverage.profdata \
+        -object ./build/${{matrix.PRESET}}/tests/tests \
+        -sources ./include/ \
+        > coverage_${{github.sha}}.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: coverage_${{github.sha}}.txt
+        path: coverage_${{github.sha}}.txt
+        retention-days: 1
+        overwrite: true
+  upload:
+    needs: [build-and-test]
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        merge-multiple: true
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{secrets.CODECOV_TOKEN}}
+        slug: tzcnt/cpputils

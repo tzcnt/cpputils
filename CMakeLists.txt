@@ -25,6 +25,17 @@ include_directories(
     ${TMC_INCLUDE_PATH}
 )
 
+# Optional flags can be passed at the command line. Used by GitHub Actions workflow.
+if(CMD_COMPILE_FLAGS)
+    message(STATUS "CMD_COMPILE_FLAGS: ${CMD_COMPILE_FLAGS}")
+    add_compile_options(${CMD_COMPILE_FLAGS})
+endif()
+
+if(CMD_LINK_FLAGS)
+    message(STATUS "CMD_LINK_FLAGS: ${CMD_LINK_FLAGS}")
+    add_link_options(${CMD_LINK_FLAGS})
+endif()
+
 # Safety / warnings checks
 
 # add_definitions("-fsanitize=address")

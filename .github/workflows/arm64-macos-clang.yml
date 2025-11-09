@@ -1,0 +1,26 @@
+name: arm64-macos-clang
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build-and-test:
+    timeout-minutes: 10
+    runs-on: macos-15
+    strategy:
+      matrix:
+        PRESET: [clang-macos-debug, clang-macos-release]
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure
+      run: cmake -G "Unix Makefiles" --preset ${{matrix.PRESET}} .
+    - name: build
+      run: cmake --build ./build/${{matrix.PRESET}} --parallel $(sysctl -n hw.logicalcpu) --target all
+    - name: run tests
+      run: ./build/${{matrix.PRESET}}/tests/tests
