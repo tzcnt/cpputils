@@ -11,19 +11,14 @@
 #include <cassert>
 #include <cstdint>
 
-/// Object pool that holds an unlimited number of objects. Objects are lazily
-/// initialized; if all objects are currently checked out, a new one will be
-/// created and returned. Objects are checked out in a LIFO manner, so that the
-/// most-frequently used objects will remain hot in cache.
+/// Object pool that holds an unlimited number of objects. It uses 64-bitmaps
+/// to track which objects are available; thus it requires a 64-bit machine.
+/// Objects are lazily initialized; if all objects are currently checked out, a
+/// new one will be created and returned. Objects are checked out in a LIFO
+/// manner, so that the most-frequently used objects will remain hot in cache.
 ///
-/// Manual pattern:
-/// 1. acquire() - check out an object index
-/// 2. get() - retrieve a reference to the object, using the index from
-/// acquire()
-/// 3. release() - return the object to the pool, using the index from acquire()
-///
-/// Modern pattern:
-/// 1. acquire_scoped() - returns an object which wraps a reference to a pool
+/// Usage:
+/// 1. Call acquire(), which returns an object that wraps a reference to a pool
 /// object, and automatically returns that object to the pool when it goes out
 /// of scope.
 /// 2. access the .value property of the scoped object to use it.
@@ -33,7 +28,7 @@
 /// the original object is what will be returned to the pool afterward.
 template <typename T, typename Derived> class BitmapObjectPool {
   // std::optional-like type that allocates space for an object
-  // without managing its lifetime.
+  // without managing its lifetime. 64-aligned to prevent false sharing.
   union alignas(64) pool_opt {
     T value;
 
@@ -53,72 +48,81 @@ template <typename T, typename Derived> class BitmapObjectPool {
     pool_opt& operator=(pool_opt&&) = delete;
   };
 
+  struct pool_block {
+    std::array<pool_opt, 64> objects;
+    std::atomic<uint64_t> available_bits;
+    std::atomic<pool_block*> next;
+    pool_block() : available_bits{0}, next{nullptr} {}
+  };
+
   static constexpr uint64_t ONE_BIT = static_cast<uint64_t>(1);
-  std::atomic<uint64_t> available_bits;
-  std::atomic<uint64_t> count;
-  std::array<pool_opt, 64> objects;
+  pool_block data;
+  std::atomic<size_t> count;
+
+  // Acquire each currently available object of the list one-by-one and
+  // call func(object). Objects that are currently in use by another thread
+  // will not be processed.
+  template <typename Fn> void for_each_available(Fn func) {
+    auto max = count.load(std::memory_order_relaxed);
+    size_t i = 0;
+    pool_block* block = &data;
+    while (i < max) {
+      auto bit = ONE_BIT << i;
+      // Try to clear this bit to take ownership of the object.
+      // If it was already clear, nothing happens.
+      auto bits = block->available_bits.fetch_and(~bit);
+      if ((bits & bit) != 0) {
+        // We now own this object. Run the caller's functor on it.
+        func(block->objects[i].value);
+        // Now release the object
+        block->available_bits.fetch_or(bit);
+      }
+      ++i;
+      if (i % 64 == 0) {
+        block = block->next;
+        if (block == nullptr) {
+          return;
+        }
+      }
+    }
+  }
+
+  // Get or construct the next block.
+  pool_block* next_block(pool_block* block) {
+    pool_block* next = block->next.load(std::memory_order_acquire);
+    if (next == nullptr) {
+      pool_block* newBlock = new pool_block;
+      if (block->next.compare_exchange_strong(
+            next, newBlock, std::memory_order_acq_rel, std::memory_order_acquire
+          )) {
+        next = newBlock;
+      } else {
+        delete newBlock;
+      }
+    }
+    return next;
+  }
 
 public:
   // This version lazily initializes objects as needed.
   // Thus it starts with 0 available objects (all bits are 0).
-  BitmapObjectPool() : available_bits{0}, count{0} {}
+  BitmapObjectPool() : count{0} {}
 
   // Destroy any objects that were used.
   ~BitmapObjectPool() {
-    for (size_t i = 0; i < count; ++i) {
-      objects[i].value.~T();
-    }
-  }
-
-public:
-  // Try to acquire each currently available element of the list one-by-one and
-  // run func() on it.
-  template <typename Fn> void for_each_available(Fn func) {
-    auto max = count.load(std::memory_order_relaxed);
-    for (uint64_t i = 0; i < max; ++i) {
-      auto bit = ONE_BIT << i;
-      // Try to clear this bit to take ownership of the object.
-      // If it was already clear, nothing happens.
-      auto bits = available_bits.fetch_and(~bit);
-      if ((bits & bit) != 0) {
-        // We now own this object. Run the caller's functor on it.
-        func(objects[i]);
-        // Now release the object
-        available_bits.fetch_or(bit);
+    size_t i = 0;
+    pool_block* block = &data;
+    auto max = count.load();
+    while (i < max) {
+      block->objects[i % 64].value.~T();
+      ++i;
+      if (i % 64 == 0) {
+        block = block->next;
+        if (block == nullptr) {
+          return;
+        }
       }
     }
-  }
-
-  uint64_t acquire() {
-    size_t idx;
-    auto bits = available_bits.load(std::memory_order_relaxed);
-    while (true) {
-      if (bits == 0) {
-        idx = count.fetch_add(1, std::memory_order_relaxed);
-        // Use CRTP to delegate initialization to derived class
-        ::new (static_cast<void*>(&objects[idx].value)) T();
-        static_cast<Derived*>(this)->init(objects[idx]);
-      }
-      idx = static_cast<uint64_t>(std::countr_zero(bits));
-      auto bit = ONE_BIT << idx;
-      // Clear this bit to take ownership of the object
-      bits = available_bits.fetch_and(~bit);
-      if ((bits & bit) != 0) {
-        return true;
-      }
-    }
-    return idx;
-  }
-
-  // Pass the index that you got from acquire().
-  // Returns a referencec to the underlying object.
-  T& get(uint64_t idx) { return objects[idx]; }
-
-  void release(uint64_t idx) {
-    auto bit = ONE_BIT << idx;
-    // Set this bit to release ownership of the object
-    [[maybe_unused]] auto old = available_bits.fetch_or(bit);
-    assert((old & bit) == 0 && "Released object you didn't own!");
   }
 
   class ScopedPoolObject {
@@ -128,17 +132,66 @@ public:
     T& value;
 
   private:
-    BitmapObjectPool& pool;
-    uint64_t idx;
-    ScopedPoolObject(BitmapObjectPool& Pool, uint64_t Idx)
-        : value{Pool.get(Idx)}, pool{Pool}, idx{Idx} {}
+    pool_block* block;
+    uint64_t bit;
+    ScopedPoolObject(T& Value, pool_block* Block, uint64_t Bit)
+        : value{Value}, block{Block}, bit{Bit} {}
 
   public:
-    ~ScopedPoolObject() { pool.release(idx); }
+    ~ScopedPoolObject() {
+      [[maybe_unused]] auto old = block->available_bits.fetch_or(bit);
+      assert((old & bit) == 0 && "Released object you didn't own!");
+    }
   };
 
-  ScopedPoolObject acquire_scoped() {
-    return ScopedPoolObject{*this, acquire()};
+  // Checks out an object from the pool, and returns a wrapper holding a
+  // reference to that pool object, which can be accessed via the `.value`
+  // field. When the wrapper goes out of scope, it will release the held
+  // reference back to the pool.
+  //
+  // If all objects are in use, constructs a new one and adds it to the pool
+  // before returning it.
+  ScopedPoolObject acquire() {
+    pool_block* block = &data;
+    size_t blockEnd = 0;
+    while (true) {
+      // Fast path: get an object from the first 64 elements block
+      auto bits = block->available_bits.load(std::memory_order_relaxed);
+      while (bits != 0) {
+        size_t idx = static_cast<uint64_t>(std::countr_zero(bits));
+        auto bit = ONE_BIT << idx;
+        // Clear this bit to try to take ownership of the object.
+        bits = block->available_bits.fetch_and(~bit);
+        // Did we actually get ownership? Or did someone beat us to it?
+        if ((bits & bit) != 0) {
+          return ScopedPoolObject{block->objects[idx].value, block, bit};
+        }
+      }
+
+      // Medium path: advance to the next block and try again
+      blockEnd += 64;
+      auto currCount = count.load(std::memory_order_relaxed);
+      if (currCount >= blockEnd) {
+        block = next_block(block);
+      } else {
+        // Slow path: Construct a new object in the current block
+        auto idx = count.fetch_add(1);
+        // We've now committed to constructing an object, but the count may have
+        // been advanced by someone else
+        while (idx >= blockEnd) [[unlikely]] {
+          block = next_block(block);
+          blockEnd += 64;
+        }
+
+        // Construct new object in-place
+        ::new (static_cast<void*>(&block->objects[idx].value)) T();
+        // Use CRTP to delegate custom initialization to derived class
+        static_cast<Derived*>(this)->init(block->objects[idx].value);
+
+        auto bit = ONE_BIT << idx;
+        return ScopedPoolObject{block->objects[idx].value, block, bit};
+      }
+    }
   }
 };
 

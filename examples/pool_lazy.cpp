@@ -12,36 +12,18 @@
 void print_from_pool(
   ContainerPool<std::unordered_map<int, std::string>>& pool, int i
 ) {
-  if (i % 2 == 0) {
-    // Demonstrate the use of manual acquire/release
-    auto idx = pool.acquire();
-    std::unordered_map<int, std::string>& map = pool.get(idx);
+  // Demonstrate the use of the scoped object
+  auto obj = pool.acquire();
+  std::unordered_map<int, std::string>& map = obj.value;
 
-    const auto iter = map.find(i);
-    if (iter != map.cend()) {
-      auto s = iter->second;
-      // std::printf("%s ", s.c_str());
-    } else {
-      auto [it, inserted] = map.emplace(i, std::to_string(i));
-      assert(inserted);
-      std::printf("%s ", it->second.c_str());
-    }
-
-    pool.release(idx);
+  const auto iter = map.find(i);
+  if (iter != map.cend()) {
+    auto s = iter->second;
+    // std::printf("%s ", s.c_str());
   } else {
-    // Demonstrate the use of the scoped object
-    auto obj = pool.acquire_scoped();
-    std::unordered_map<int, std::string>& map = obj.value;
-
-    const auto iter = map.find(i);
-    if (iter != map.cend()) {
-      auto s = iter->second;
-      // std::printf("%s ", s.c_str());
-    } else {
-      auto [it, inserted] = map.emplace(i, std::to_string(i));
-      assert(inserted);
-      std::printf("%s ", it->second.c_str());
-    }
+    auto [it, inserted] = map.emplace(i, std::to_string(i));
+    assert(inserted);
+    std::printf("%s ", it->second.c_str());
   }
 }
 
@@ -54,7 +36,7 @@ pool_user(ContainerPool<std::unordered_map<int, std::string>>& pool) {
 }
 
 // int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
-//   tmc::cpu_executor().set_thread_count(2);
+//   tmc::cpu_executor().set_thread_count(64);
 //   return tmc::async_main([]() -> tmc::task<int> {
 //     ContainerPool<std::unordered_map<int, std::string>> stringPool;
 
@@ -81,11 +63,11 @@ class OPool : public BitmapObjectPool<O, OPool> {
 };
 
 tmc::task<void> opool_user(OPool& pool) {
-  auto scoped = pool.acquire_scoped();
+  auto scoped = pool.acquire();
   co_return;
 }
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
-  tmc::cpu_executor().set_thread_count(2);
+  tmc::cpu_executor().set_thread_count(64);
   return tmc::async_main([]() -> tmc::task<int> {
     OPool stringPool;
 
