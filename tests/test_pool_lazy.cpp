@@ -19,16 +19,20 @@ protected:
   static tmc::ex_cpu& ex() { return tmc::cpu_executor(); }
 };
 
-// Pool customization to reserve space for any container type
-class DestructorCounterPool : public BitmapObjectPool<destructor_counter> {
-  void initialize(void* location) override final {
+// Pool customization to pass through external pointer variable
+// to each destructor_counter constructor
+class DestructorCounterPool
+    : public BitmapObjectPoolImpl<destructor_counter, DestructorCounterPool> {
+  friend class BitmapObjectPoolImpl<destructor_counter, DestructorCounterPool>;
+  void initialize(void* location) {
     ::new (location) destructor_counter(destroyed_count);
   }
 
 public:
   std::atomic<size_t>* destroyed_count;
   DestructorCounterPool(std::atomic<size_t>& Count)
-      : destroyed_count{&Count}, BitmapObjectPool<destructor_counter>() {}
+      : destroyed_count{&Count},
+        BitmapObjectPoolImpl<destructor_counter, DestructorCounterPool>() {}
 };
 
 TEST_F(CATEGORY, destructor_count) {

@@ -10,8 +10,10 @@
 #include <unordered_map>
 
 // Pool customization to reserve space for any container type
-template <typename C> class ContainerPool final : public BitmapObjectPool<C> {
-  void initialize(void* location) override {
+template <typename C>
+class ContainerPool final : public BitmapObjectPoolImpl<C, ContainerPool<C>> {
+  friend class BitmapObjectPoolImpl<C, ContainerPool<C>>;
+  void initialize(void* location) {
     C* newContainer = ::new (location) C();
     newContainer->reserve(500);
   }

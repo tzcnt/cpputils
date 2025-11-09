@@ -26,7 +26,7 @@
 /// In either case, the references returned are directly to the objects stored
 /// in the pool. Be careful not to accidentally move or copy this object, as
 /// the original object is what will be returned to the pool afterward.
-template <typename T> class BitmapObjectPool {
+template <typename T, typename Derived> class BitmapObjectPoolImpl {
   // std::optional-like type that allocates space for an object
   // without managing its lifetime. 64-aligned to prevent false sharing.
   union alignas(64) pool_opt {
@@ -53,6 +53,8 @@ template <typename T> class BitmapObjectPool {
     std::atomic<uint64_t> available_bits;
     std::atomic<pool_block*> next;
     pool_block() : available_bits{0}, next{nullptr} {}
+
+    T& get(size_t idx) { return objects[idx % 64].value; }
   };
 
   static constexpr uint64_t ONE_BIT = static_cast<uint64_t>(1);
@@ -75,22 +77,17 @@ template <typename T> class BitmapObjectPool {
     return next;
   }
 
-  // You can derive from this class and override initialize() to customize how
-  // new pool objects are created. Overriden implementations must at least
-  // construct the object at the pointer location using placement new.
-  virtual void initialize(void* location) = 0; // { ::new (location) T(); }
-
 public:
   /// Constructs a new, empty object pool.
-  BitmapObjectPool() : count{0} {}
+  BitmapObjectPoolImpl() : count{0} {}
 
   /// Destroy any objects that were created by the pool.
-  ~BitmapObjectPool() {
+  ~BitmapObjectPoolImpl() {
     size_t i = 0;
     pool_block* block = &data;
     auto max = count.load();
     while (i < max) {
-      block->objects[i % 64].value.~T();
+      block->get(i).~T();
       ++i;
       if (i % 64 == 0) {
         block = block->next;
@@ -104,7 +101,7 @@ public:
   /// Wrapper to an object pool reference (the .value field).
   /// When this goes out of scope, the object will be returned to the pool.
   class ScopedPoolObject {
-    friend BitmapObjectPool;
+    friend BitmapObjectPoolImpl;
 
   public:
     T& value;
@@ -150,7 +147,7 @@ public:
         bits = block->available_bits.fetch_and(~bit);
         // Did we actually get ownership? Or did someone beat us to it?
         if ((bits & bit) != 0) {
-          return ScopedPoolObject{block->objects[idx % 64].value, block, bit};
+          return ScopedPoolObject{block->get(idx), block, bit};
         }
       }
 
@@ -163,17 +160,19 @@ public:
         // Slow path: Construct a new object in the current block
         auto idx = count.fetch_add(1);
         // We've now committed to constructing an object, but the count may have
-        // been advanced by someone else
+        // been advanced by another thread. Ensure we are on the right block.
         while (idx >= blockEnd) [[unlikely]] {
           block = next_block(block);
           blockEnd += 64;
         }
 
-        // Construct new object in-place, possibly delegating to derived class
-        initialize(static_cast<void*>(&block->objects[idx % 64].value));
+        // Derived class implementation (using CRTP) constructs object in-place
+        static_cast<Derived*>(this)->initialize(
+          static_cast<void*>(&block->get(idx))
+        );
 
         auto bit = ONE_BIT << idx;
-        return ScopedPoolObject{block->objects[idx % 64].value, block, bit};
+        return ScopedPoolObject{block->get(idx), block, bit};
       }
     }
   }
@@ -205,4 +204,17 @@ public:
       }
     }
   }
+};
+
+/// A default implementation of `BitmapObjectPoolImpl` is provided, which just
+/// default-initializes objects when they are created in the pool.
+///
+/// You can also derive from `BitmapObjectPoolImpl` directly and implement
+/// `initialize()` yourself, to customize how new pool objects are created.
+/// Your implementation must at least construct the object at the provided
+/// location using placement new.
+template <typename T>
+class BitmapObjectPool : public BitmapObjectPoolImpl<T, BitmapObjectPool<T>> {
+  friend class BitmapObjectPoolImpl<T, BitmapObjectPool<T>>;
+  void initialize(void* location) { ::new (location) T(); }
 };
