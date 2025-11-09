@@ -18,8 +18,11 @@ CPMAddPackage(
     GIT_REPOSITORY https://github.com/tzcnt/TooManyCooks.git
     GIT_TAG v1.1.0
     DOWNLOAD_ONLY)
+
+# provided for the tests subproject
+set(TMC_INCLUDE_PATH ${TooManyCooks_SOURCE_DIR}/include CACHE STRING "" FORCE)
 include_directories(
-    ${TooManyCooks_SOURCE_DIR}/include
+    ${TMC_INCLUDE_PATH}
 )
 
 # Safety / warnings checks
@@ -49,3 +52,5 @@ make_exe(pool_eager
 make_exe(pool_lazy
     examples/pool_lazy.cpp
 )
+
+add_subdirectory(tests)
