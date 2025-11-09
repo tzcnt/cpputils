@@ -9,12 +9,13 @@
 #include <string>
 #include <unordered_map>
 
-void print_from_pool(ContainerPool<std::unordered_map<int, std::string>> &pool,
-                     int i) {
+void print_from_pool(
+  ContainerPool<std::unordered_map<int, std::string>>& pool, int i
+) {
   if (i % 2 == 0) {
     // Demonstrate the use of manual acquire/release
     auto idx = pool.acquire();
-    std::unordered_map<int, std::string> &map = pool.get(idx);
+    std::unordered_map<int, std::string>& map = pool.get(idx);
 
     const auto iter = map.find(i);
     if (iter != map.cend()) {
@@ -30,7 +31,7 @@ void print_from_pool(ContainerPool<std::unordered_map<int, std::string>> &pool,
   } else {
     // Demonstrate the use of the scoped object
     auto obj = pool.acquire_scoped();
-    std::unordered_map<int, std::string> &map = obj.value;
+    std::unordered_map<int, std::string>& map = obj.value;
 
     const auto iter = map.find(i);
     if (iter != map.cend()) {
@@ -45,21 +46,52 @@ void print_from_pool(ContainerPool<std::unordered_map<int, std::string>> &pool,
 }
 
 tmc::task<void>
-pool_user(ContainerPool<std::unordered_map<int, std::string>> &pool) {
+pool_user(ContainerPool<std::unordered_map<int, std::string>>& pool) {
   for (size_t i = 0; i < 10; ++i) {
     print_from_pool(pool, i);
   }
   co_return;
 }
 
-int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
-  tmc::cpu_executor().set_thread_count(64);
+// int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+//   tmc::cpu_executor().set_thread_count(2);
+//   return tmc::async_main([]() -> tmc::task<int> {
+//     ContainerPool<std::unordered_map<int, std::string>> stringPool;
+
+//     auto tasks = std::ranges::views::iota(0, 1000000) |
+//                  std::ranges::views::transform([&](int i) -> tmc::task<void>
+//                  {
+//                    return pool_user(stringPool);
+//                  });
+//     co_await tmc::spawn_many(tasks);
+//     co_return 0;
+//   }());
+// }
+
+struct O {
+  O() {}
+  ~O() { std::printf("destroyed "); }
+};
+
+class OPool : public BitmapObjectPool<O, OPool> {
+  friend class BitmapObjectPool<O, OPool>;
+
+  // Implement init() for the container type
+  void init([[maybe_unused]] O& newContainer) {}
+};
+
+tmc::task<void> opool_user(OPool& pool) {
+  auto scoped = pool.acquire_scoped();
+  co_return;
+}
+int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+  tmc::cpu_executor().set_thread_count(2);
   return tmc::async_main([]() -> tmc::task<int> {
-    ContainerPool<std::unordered_map<int, std::string>> stringPool;
+    OPool stringPool;
 
     auto tasks = std::ranges::views::iota(0, 1000000) |
                  std::ranges::views::transform([&](int i) -> tmc::task<void> {
-                   return pool_user(stringPool);
+                   return opool_user(stringPool);
                  });
     co_await tmc::spawn_many(tasks);
     co_return 0;

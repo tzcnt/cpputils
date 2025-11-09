@@ -11,41 +11,44 @@
 #include <cassert>
 #include <cstdint>
 
-template <typename T, size_t Alignment = alignof(T)>
-union alignas(Alignment) tiny_opt {
-  T value;
-
-  operator T&() & { return value; }
-  operator const T&() const& { return value; }
-  operator T&&() && { return static_cast<T&&>(value); }
-
-  tiny_opt() {}
-
-  tiny_opt(const tiny_opt&) = delete;
-  tiny_opt& operator=(const tiny_opt&) = delete;
-  tiny_opt(tiny_opt&&) = delete;
-  tiny_opt& operator=(tiny_opt&&) = delete;
-
-  ~tiny_opt()
-    requires(std::is_trivially_destructible_v<T>)
-  = default;
-  ~tiny_opt()
-    requires(!std::is_trivially_destructible_v<T>)
-  {
-    value.~T();
-  }
-};
-
 template <typename T, typename Derived> class BitmapObjectPool {
+  // std::optional-like type that allocates space for an object
+  // without managing its lifetime.
+  union alignas(64) pool_opt {
+    T value;
+
+    operator T&() & { return value; }
+    operator const T&() const& { return value; }
+    operator T&&() && { return static_cast<T&&>(value); }
+
+    // Don't construct the contained object; the pool will do it.
+    pool_opt() {}
+
+    // Don't destroy the contained object; the pool will do it.
+    ~pool_opt() {}
+
+    pool_opt(const pool_opt&) = delete;
+    pool_opt& operator=(const pool_opt&) = delete;
+    pool_opt(pool_opt&&) = delete;
+    pool_opt& operator=(pool_opt&&) = delete;
+  };
+
   static constexpr uint64_t ONE_BIT = static_cast<uint64_t>(1);
   std::atomic<uint64_t> available_bits;
   std::atomic<uint64_t> count;
-  std::array<T, 64> objects;
+  std::array<pool_opt, 64> objects;
 
 public:
   // This version lazily initializes objects as needed.
   // Thus it starts with 0 available objects (all bits are 0).
   BitmapObjectPool() : available_bits{0}, count{0} {}
+
+  // Destroy any objects that were used.
+  ~BitmapObjectPool() {
+    for (size_t i = 0; i < count; ++i) {
+      objects[i].value.~T();
+    }
+  }
 
 protected:
   bool try_init(uint64_t& idx) {
@@ -56,6 +59,7 @@ protected:
       }
       if (count.compare_exchange_strong(idx, idx + 1)) {
         // Use CRTP to delegate initialization to derived class
+        ::new (static_cast<void*>(&objects[idx].value)) T();
         static_cast<Derived*>(this)->init(objects[idx]);
         return true;
       }
