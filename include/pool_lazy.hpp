@@ -208,7 +208,7 @@ public:
       }
       ++i;
       if (i % 64 == 0) {
-        block = block->next;
+        block = block->next.load();
         if (block == nullptr) {
           return;
         }
