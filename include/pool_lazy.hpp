@@ -82,21 +82,26 @@ public:
   BitmapObjectPoolImpl() : data{new pool_block}, count{0} {}
 
   /// Destroy any objects that were created by the pool.
-  ~BitmapObjectPoolImpl() {
+  virtual ~BitmapObjectPoolImpl() {
     size_t i = 0;
-    pool_block* block = &data;
+    pool_block* block = data;
     auto max = count.fetch_add(1);
     while (i < max) {
       block->get(i).~T();
       ++i;
       if (i % 64 == 0) {
-        auto next = block->next.load();
-        delete block;
-        if (next == nullptr) {
-          return;
+        block = block->next.load();
+        if (block == nullptr) {
+          break;
         }
-        block = next;
       }
+    }
+
+    block = data;
+    while (block != nullptr) {
+      auto next = block->next.load();
+      delete block;
+      block = next;
     }
   }
 
@@ -137,7 +142,7 @@ public:
   // If all objects are in use, constructs a new one and adds it to the pool
   // before returning it.
   ScopedPoolObject acquire() {
-    pool_block* block = &data;
+    pool_block* block = data;
     size_t blockEnd = 0;
     while (true) {
       // Fast path: get an object from the first 64 elements block
@@ -173,7 +178,7 @@ public:
           static_cast<void*>(&block->get(idx))
         );
 
-        auto bit = ONE_BIT << idx;
+        auto bit = ONE_BIT << (idx % 64);
         return ScopedPoolObject{block->get(idx), block, bit};
       }
     }
@@ -185,15 +190,15 @@ public:
   template <typename Fn> void for_each_available(Fn func) {
     auto max = count.load(std::memory_order_relaxed);
     size_t i = 0;
-    pool_block* block = &data;
+    pool_block* block = data;
     while (i < max) {
-      auto bit = ONE_BIT << i;
+      auto bit = ONE_BIT << (i % 64);
       // Try to clear this bit to take ownership of the object.
       // If it was already clear, nothing happens.
       auto bits = block->available_bits.fetch_and(~bit);
       if ((bits & bit) != 0) {
         // We now own this object. Run the caller's functor on it.
-        func(block->objects[i].value);
+        func(block->get(i));
         // Now release the object
         block->available_bits.fetch_or(bit);
       }
