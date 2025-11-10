@@ -36,26 +36,25 @@ public:
         destroyed_count{&Count} {}
 };
 
-template <size_t Count> void destructor_count_test(tmc::ex_cpu& ex) {
+template <int Count> void destructor_count_test(tmc::ex_cpu& ex) {
   test_async_main(ex, []() -> tmc::task<void> {
     std::atomic<size_t> destroyed_count = 0;
     {
       DestructorCounterPool pool{destroyed_count};
       tmc::barrier bar(Count);
 
-      auto tasks =
-        std::ranges::views::iota(0ULL, Count) |
-        std::ranges::views::transform([&](size_t i) -> tmc::task<void> {
-          return [](
-                   DestructorCounterPool& Pool, tmc::barrier& Bar
-                 ) -> tmc::task<void> {
-            auto obj = Pool.acquire();
-            // Use this barrier to force each task to acquire a newly created
-            // pool object, before releasing them all
-            co_await Bar;
-            co_return;
-          }(pool, bar);
-        });
+      auto tasks = std::ranges::views::iota(0, Count) |
+                   std::ranges::views::transform([&](int i) -> tmc::task<void> {
+                     return [](
+                              DestructorCounterPool& Pool, tmc::barrier& Bar
+                            ) -> tmc::task<void> {
+                       auto obj = Pool.acquire();
+                       // Use this barrier to force each task to acquire a newly
+                       // created pool object, before releasing them all
+                       co_await Bar;
+                       co_return;
+                     }(pool, bar);
+                   });
       co_await tmc::spawn_many(tasks);
     }
     EXPECT_EQ(destroyed_count.load(), Count);
@@ -70,13 +69,13 @@ TEST_F(CATEGORY, destructor_count_127) { destructor_count_test<127>(ex()); }
 TEST_F(CATEGORY, destructor_count_128) { destructor_count_test<128>(ex()); }
 TEST_F(CATEGORY, destructor_count_9999) { destructor_count_test<9999>(ex()); }
 
-template <size_t Count> void vector_test(tmc::ex_cpu& ex) {
+template <int Count> void vector_test(tmc::ex_cpu& ex) {
   test_async_main(ex, []() -> tmc::task<void> {
     BitmapObjectPool<std::vector<size_t>> pool;
 
     auto tasks =
-      std::ranges::views::iota(0UL, Count) |
-      std::ranges::views::transform([&](size_t i) -> tmc::task<void> {
+      std::ranges::views::iota(0, Count) |
+      std::ranges::views::transform([&](int i) -> tmc::task<void> {
         return [](
                  BitmapObjectPool<std::vector<size_t>>& Pool, size_t idx
                ) -> tmc::task<void> {
