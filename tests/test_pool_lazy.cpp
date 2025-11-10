@@ -32,8 +32,8 @@ class DestructorCounterPool
 public:
   std::atomic<size_t>* destroyed_count;
   DestructorCounterPool(std::atomic<size_t>& Count)
-      : destroyed_count{&Count},
-        BitmapObjectPoolImpl<destructor_counter, DestructorCounterPool>() {}
+      : BitmapObjectPoolImpl<destructor_counter, DestructorCounterPool>(),
+        destroyed_count{&Count} {}
 };
 
 template <size_t Count> void destructor_count_test(tmc::ex_cpu& ex) {
@@ -44,7 +44,7 @@ template <size_t Count> void destructor_count_test(tmc::ex_cpu& ex) {
       tmc::barrier bar(Count);
 
       auto tasks =
-        std::ranges::views::iota(0UL, Count) |
+        std::ranges::views::iota(0ULL, Count) |
         std::ranges::views::transform([&](size_t i) -> tmc::task<void> {
           return [](
                    DestructorCounterPool& Pool, tmc::barrier& Bar

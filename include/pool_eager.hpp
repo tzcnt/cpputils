@@ -63,7 +63,7 @@ public:
   }
 
   uint64_t acquire() {
-    size_t idx;
+    uint64_t idx;
     [[maybe_unused]] bool ok = try_acquire(idx);
     assert(ok && "All pool objects are in use!");
     return idx;
