@@ -122,4 +122,45 @@ TEST_F(CATEGORY, vector_127) { vector_test<127>(ex()); }
 TEST_F(CATEGORY, vector_128) { vector_test<128>(ex()); }
 TEST_F(CATEGORY, vector_9999) { vector_test<9999>(ex()); }
 
+TEST_F(CATEGORY, vector_count) {
+  test_async_main(ex(), []() -> tmc::task<void> {
+    BitmapObjectPool<std::vector<size_t>> pool;
+
+    int Count = 9999;
+    tmc::barrier bar(Count);
+    auto tasks = std::ranges::views::iota(0, Count) |
+                 std::ranges::views::transform([&](int i) -> tmc::task<void> {
+                   return [](
+                            BitmapObjectPool<std::vector<size_t>>& Pool,
+                            size_t idx, tmc::barrier& Bar
+                          ) -> tmc::task<void> {
+                     auto obj = Pool.acquire();
+                     auto& vec = obj.value;
+                     vec.push_back(idx);
+                     co_await Bar;
+                     co_return;
+                   }(pool, i, bar);
+                 });
+    co_await tmc::spawn_many(tasks);
+
+    std::vector<size_t> results;
+    results.reserve(Count);
+    size_t vecCount = 0;
+    pool.for_each_available(
+      [&results, &vecCount](std::vector<size_t>& poolVec) -> void {
+        EXPECT_EQ(poolVec.size(), 1);
+        results.push_back(poolVec[0]);
+        ++vecCount;
+      }
+    );
+
+    EXPECT_EQ(vecCount, 9999);
+
+    // Each value should be present in a different pool
+    std::sort(results.begin(), results.end());
+    for (size_t i = 0; i < Count; ++i) {
+      EXPECT_EQ(i, results[i]);
+    }
+  }());
+}
 #undef CATEGORY
