@@ -58,7 +58,7 @@ template <typename T, typename Derived> class BitmapObjectPoolImpl {
   };
 
   static constexpr uint64_t ONE_BIT = static_cast<uint64_t>(1);
-  pool_block data;
+  pool_block* data;
   std::atomic<size_t> count;
 
   // Get or construct the next block.
@@ -79,21 +79,23 @@ template <typename T, typename Derived> class BitmapObjectPoolImpl {
 
 public:
   /// Constructs a new, empty object pool.
-  BitmapObjectPoolImpl() : count{0} {}
+  BitmapObjectPoolImpl() : data{new pool_block}, count{0} {}
 
   /// Destroy any objects that were created by the pool.
   ~BitmapObjectPoolImpl() {
     size_t i = 0;
     pool_block* block = &data;
-    auto max = count.load();
+    auto max = count.fetch_add(1);
     while (i < max) {
       block->get(i).~T();
       ++i;
       if (i % 64 == 0) {
-        block = block->next;
-        if (block == nullptr) {
+        auto next = block->next.load();
+        delete block;
+        if (next == nullptr) {
           return;
         }
+        block = next;
       }
     }
   }
