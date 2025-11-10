@@ -54,7 +54,7 @@ template <typename T, typename Derived> class BitmapObjectPoolImpl {
     std::atomic<pool_block*> next;
     pool_block() : available_bits{0}, next{nullptr} {}
 
-    T& get(size_t idx) { return objects[idx % 64].value; }
+    T& get(size_t idx) { return objects[idx].value; }
   };
 
   static constexpr uint64_t ONE_BIT = static_cast<uint64_t>(1);
@@ -87,7 +87,8 @@ public:
     pool_block* block = data;
     auto max = count.fetch_add(1);
     while (i < max) {
-      block->get(i).~T();
+      auto bitIdx = i % 64;
+      block->get(bitIdx).~T();
       ++i;
       if (i % 64 == 0) {
         block = block->next.load();
@@ -148,13 +149,13 @@ public:
       // Fast path: get an object from the first 64 elements block
       auto bits = block->available_bits.load(std::memory_order_relaxed);
       while (bits != 0) {
-        size_t idx = static_cast<uint64_t>(std::countr_zero(bits));
-        auto bit = ONE_BIT << idx;
+        size_t bitIdx = static_cast<size_t>(std::countr_zero(bits));
+        auto bit = ONE_BIT << bitIdx;
         // Clear this bit to try to take ownership of the object.
         bits = block->available_bits.fetch_and(~bit);
         // Did we actually get ownership? Or did someone beat us to it?
         if ((bits & bit) != 0) {
-          return ScopedPoolObject{block->get(idx), block, bit};
+          return ScopedPoolObject{block->get(bitIdx), block, bit};
         }
       }
 
@@ -173,13 +174,15 @@ public:
           blockEnd += 64;
         }
 
+        auto bitIdx = idx % 64;
+
         // Derived class implementation (using CRTP) constructs object in-place
         static_cast<Derived*>(this)->initialize(
-          static_cast<void*>(&block->get(idx))
+          static_cast<void*>(&block->get(bitIdx))
         );
 
-        auto bit = ONE_BIT << (idx % 64);
-        return ScopedPoolObject{block->get(idx), block, bit};
+        auto bit = ONE_BIT << bitIdx;
+        return ScopedPoolObject{block->get(bitIdx), block, bit};
       }
     }
   }
@@ -192,13 +195,14 @@ public:
     size_t i = 0;
     pool_block* block = data;
     while (i < max) {
-      auto bit = ONE_BIT << (i % 64);
+      auto bitIdx = i % 64;
+      auto bit = ONE_BIT << bitIdx;
       // Try to clear this bit to take ownership of the object.
       // If it was already clear, nothing happens.
       auto bits = block->available_bits.fetch_and(~bit);
       if ((bits & bit) != 0) {
         // We now own this object. Run the caller's functor on it.
-        func(block->get(i));
+        func(block->get(bitIdx));
         // Now release the object
         block->available_bits.fetch_or(bit);
       }
