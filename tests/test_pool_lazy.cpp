@@ -48,7 +48,7 @@ template <int Count> void destructor_count_test(tmc::ex_cpu& ex) {
                      return [](
                               DestructorCounterPool& Pool, tmc::barrier& Bar
                             ) -> tmc::task<void> {
-                       auto obj = Pool.acquire();
+                       auto obj = Pool.acquire_scoped();
                        // Use this barrier to force each task to acquire a newly
                        // created pool object, before releasing them all
                        co_await Bar;
@@ -79,7 +79,7 @@ template <int Count> void vector_test(tmc::ex_cpu& ex) {
         return [](
                  BitmapObjectPool<std::vector<size_t>>& Pool, size_t idx
                ) -> tmc::task<void> {
-          auto obj = Pool.acquire();
+          auto obj = Pool.acquire_scoped();
           auto& vec = obj.value;
           vec.push_back(idx);
           co_return;
@@ -134,7 +134,7 @@ TEST_F(CATEGORY, vector_count) {
                             BitmapObjectPool<std::vector<size_t>>& Pool,
                             size_t idx, tmc::barrier& Bar
                           ) -> tmc::task<void> {
-                     auto obj = Pool.acquire();
+                     auto obj = Pool.acquire_scoped();
                      auto& vec = obj.value;
                      vec.push_back(idx);
                      co_await Bar;

@@ -23,7 +23,7 @@ void print_from_pool(
   ContainerPool<std::unordered_map<int, std::string>>& pool, int i
 ) {
   // Demonstrate the use of the scoped object
-  auto obj = pool.acquire();
+  auto obj = pool.acquire_scoped();
   std::unordered_map<int, std::string>& map = obj.value;
 
   const auto iter = map.find(i);

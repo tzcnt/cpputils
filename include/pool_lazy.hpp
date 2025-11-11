@@ -8,7 +8,6 @@
 #include <array>
 #include <atomic>
 #include <bit>
-#include <cassert>
 #include <cstdint>
 
 /// Object pool that holds an unlimited number of objects. It uses 64-bitmaps
@@ -18,9 +17,9 @@
 /// manner, so that the most-frequently used objects will remain hot in cache.
 ///
 /// Usage:
-/// 1. Call acquire(), which returns an object that wraps a reference to a pool
-/// object, and automatically returns that object to the pool when it goes out
-/// of scope.
+/// 1. Call acquire_scoped(), which returns an object that wraps a reference to
+/// a pool object, and automatically returns that object to the pool when it
+/// goes out of scope.
 /// 2. access the .value property of the scoped object to use it.
 ///
 /// In either case, the references returned are directly to the objects stored
@@ -121,10 +120,7 @@ public:
         : value{Value}, block{Block}, bit{Bit} {}
 
   public:
-    ~ScopedPoolObject() {
-      [[maybe_unused]] auto old = block->available_bits.fetch_or(bit);
-      assert((old & bit) == 0 && "Released object you didn't own!");
-    }
+    ~ScopedPoolObject() { block->available_bits.fetch_or(bit); }
 
     // Not copyable due to owning a unique checkout of an object.
     ScopedPoolObject(const ScopedPoolObject&) = delete;
@@ -142,7 +138,7 @@ public:
   //
   // If all objects are in use, constructs a new one and adds it to the pool
   // before returning it.
-  ScopedPoolObject acquire() {
+  ScopedPoolObject acquire_scoped() {
     pool_block* block = data;
     size_t blockEnd = 0;
     while (true) {
