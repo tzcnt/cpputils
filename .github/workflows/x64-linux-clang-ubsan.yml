@@ -1,0 +1,26 @@
+name: UndefinedBehaviorSanitizer
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build-and-test:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        PRESET: [clang-linux-debug]
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure
+      run: cmake -G "Unix Makefiles" -DCMD_COMPILE_FLAGS='-fsanitize=undefined;-fno-sanitize-recover' -DCMD_LINK_FLAGS='-fsanitize=undefined' --preset ${{matrix.PRESET}} .
+    - name: build
+      run: cmake --build ./build/${{matrix.PRESET}} --parallel $(nproc) --target all
+    - name: run tests
+      run: ./build/${{matrix.PRESET}}/tests/tests

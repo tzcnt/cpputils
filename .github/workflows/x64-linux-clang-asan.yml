@@ -1,0 +1,26 @@
+name: AddressSanitizer
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build-and-test:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        PRESET: [clang-linux-debug]
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure
+      run: cmake -G "Unix Makefiles" -DCMD_COMPILE_FLAGS='-fsanitize=address' -DCMD_LINK_FLAGS='-fsanitize=address' --preset ${{matrix.PRESET}} .
+    - name: build
+      run: cmake --build ./build/${{matrix.PRESET}} --parallel $(nproc) --target all
+    - name: run tests
+      run: ASAN_OPTIONS="detect_leaks=1" ./build/${{matrix.PRESET}}/tests/tests

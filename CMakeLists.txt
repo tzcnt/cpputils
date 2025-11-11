@@ -18,9 +18,23 @@ CPMAddPackage(
     GIT_REPOSITORY https://github.com/tzcnt/TooManyCooks.git
     GIT_TAG v1.1.0
     DOWNLOAD_ONLY)
+
+# provided for the tests subproject
+set(TMC_INCLUDE_PATH ${TooManyCooks_SOURCE_DIR}/include CACHE STRING "" FORCE)
 include_directories(
-    ${TooManyCooks_SOURCE_DIR}/include
+    ${TMC_INCLUDE_PATH}
 )
+
+# Optional flags can be passed at the command line. Used by GitHub Actions workflow.
+if(CMD_COMPILE_FLAGS)
+    message(STATUS "CMD_COMPILE_FLAGS: ${CMD_COMPILE_FLAGS}")
+    add_compile_options(${CMD_COMPILE_FLAGS})
+endif()
+
+if(CMD_LINK_FLAGS)
+    message(STATUS "CMD_LINK_FLAGS: ${CMD_LINK_FLAGS}")
+    add_link_options(${CMD_LINK_FLAGS})
+endif()
 
 # Safety / warnings checks
 
@@ -42,10 +56,12 @@ function(make_exe target_name)
     )
 endfunction()
 
-make_exe(pool_eager
-    examples/pool_eager.cpp
+make_exe(bitmap_object_pool_64
+    examples/bitmap_object_pool_64.cpp
 )
 
-make_exe(pool_lazy
-    examples/pool_lazy.cpp
+make_exe(bitmap_object_pool
+    examples/bitmap_object_pool.cpp
 )
+
+add_subdirectory(tests)

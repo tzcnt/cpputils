@@ -1,0 +1,27 @@
+name: x64-windows-clang-cl
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build-and-test:
+    timeout-minutes: 10
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        PRESET: [clang-win-debug, clang-win-release]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ilammy/msvc-dev-cmd@v1
+    - name: configure
+      run: cmake -G "Ninja" --preset ${{matrix.PRESET}} .
+    - name: build
+      run: cmake --build ./build/${{matrix.PRESET}} --target all
+    - name: run tests
+      run: ./build/${{matrix.PRESET}}/tests/tests.exe
