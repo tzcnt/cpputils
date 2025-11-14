@@ -5,3 +5,7 @@
 # cpputils
 
 High-performance utility classes and data structures.
+
+These utilities are header-only. Each header in `/include` is a standalone utility class with no dependencies on the other headers.
+
+There is a CMake project for the examples and tests, but it is not required to build this project in order to make use of the headers.
