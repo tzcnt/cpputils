@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <type_traits>
 
+namespace tzcnt_utils {
+
 class coro_functor {
   static constexpr uintptr_t IS_COROUTINE = 0x0;
   static constexpr uintptr_t IS_FREE_FUNC = 0x1;
@@ -191,3 +193,5 @@ public:
     memberFunc(obj, false);
   }
 };
+
+} // namespace tzcnt_utils

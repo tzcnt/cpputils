@@ -10,6 +10,8 @@
 #include <bit>
 #include <cstdint>
 
+namespace tzcnt_utils {
+
 /// Object pool that holds an unlimited number of objects. It uses 64-bitmaps
 /// to track which objects are available; thus it requires a 64-bit machine.
 /// Objects are lazily initialized; if all objects are currently checked out, a
@@ -225,3 +227,5 @@ class BitmapObjectPool : public BitmapObjectPoolImpl<T, BitmapObjectPool<T>> {
   friend class BitmapObjectPoolImpl<T, BitmapObjectPool<T>>;
   void initialize(void* location) { ::new (location) T(); }
 };
+
+} // namespace tzcnt_utils

@@ -7,6 +7,8 @@
 #include <ranges>
 #include <vector>
 
+using namespace tzcnt_utils;
+
 #define CATEGORY test_bitmap_object_pool
 
 class CATEGORY : public testing::Test {

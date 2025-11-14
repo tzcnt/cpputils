@@ -11,6 +11,8 @@
 #include <cassert>
 #include <cstdint>
 
+namespace tzcnt_utils {
+
 /// Small object pool that holds 64 objects. It uses a 64-bitmap
 /// to track which objects are available; thus it requires a 64-bit machine. All
 /// objects are eagerly initialized. Objects are checked out in a LIFO manner,
@@ -99,3 +101,5 @@ public:
     return ScopedPoolObject{*this, acquire()};
   }
 };
+
+} // namespace tzcnt_utils

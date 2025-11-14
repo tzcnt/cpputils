@@ -9,6 +9,8 @@
 #include <string>
 #include <unordered_map>
 
+using namespace tzcnt_utils;
+
 // Pool customization to reserve space for any container type
 template <typename C>
 class ContainerPool final : public BitmapObjectPoolImpl<C, ContainerPool<C>> {

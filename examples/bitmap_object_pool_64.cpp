@@ -8,6 +8,8 @@
 #include <string>
 #include <unordered_map>
 
+using namespace tzcnt_utils;
+
 void print_from_pool(
   BitmapObjectPool64<std::unordered_map<int, std::string>>& pool, int i
 ) {
