@@ -140,7 +140,8 @@ public:
   //
   // If all objects are in use, constructs a new one and adds it to the pool
   // before returning it.
-  ScopedPoolObject acquire_scoped() {
+  template <typename... Args>
+  ScopedPoolObject acquire_scoped(Args&&... args) {
     pool_block* block = data;
     size_t blockEnd = 0;
     while (true) {
@@ -176,7 +177,8 @@ public:
 
         // Derived class implementation (using CRTP) constructs object in-place
         static_cast<Derived*>(this)->initialize(
-          static_cast<void*>(&block->get(bitIdx))
+          static_cast<void*>(&block->get(bitIdx)),
+          std::forward<Args>(args)...
         );
 
         auto bit = ONE_BIT << bitIdx;
