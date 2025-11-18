@@ -165,4 +165,16 @@ TEST_F(CATEGORY, vector_count) {
     }
   }());
 }
+
+TEST_F(CATEGORY, initialize_with_params) {
+  BitmapObjectPool<std::vector<size_t>> pool;
+  {
+    auto obj = pool.acquire_scoped(5);
+    EXPECT_EQ(obj.value.size(), 5);
+  }
+  {
+    auto obj = pool.acquire_scoped();
+    EXPECT_EQ(obj.value.size(), 5);
+  }
+}
 #undef CATEGORY

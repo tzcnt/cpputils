@@ -139,9 +139,11 @@ public:
   // reference back to the pool.
   //
   // If all objects are in use, constructs a new one and adds it to the pool
-  // before returning it.
-  template <typename... Args>
-  ScopedPoolObject acquire_scoped(Args&&... args) {
+  // before returning it. Any args provided will be forwarded to the
+  // `initialize()` function of the derived class. In the default
+  // implementation `BitmapObjectPool`, these args are forwarded to the
+  // new object's constructor.
+  template <typename... Args> ScopedPoolObject acquire_scoped(Args&&... args) {
     pool_block* block = data;
     size_t blockEnd = 0;
     while (true) {
@@ -177,8 +179,7 @@ public:
 
         // Derived class implementation (using CRTP) constructs object in-place
         static_cast<Derived*>(this)->initialize(
-          static_cast<void*>(&block->get(bitIdx)),
-          std::forward<Args>(args)...
+          static_cast<void*>(&block->get(bitIdx)), static_cast<Args&&>(args)...
         );
 
         auto bit = ONE_BIT << bitIdx;
@@ -227,7 +228,9 @@ public:
 template <typename T>
 class BitmapObjectPool : public BitmapObjectPoolImpl<T, BitmapObjectPool<T>> {
   friend class BitmapObjectPoolImpl<T, BitmapObjectPool<T>>;
-  void initialize(void* location) { ::new (location) T(); }
+  template <typename... Args> void initialize(void* location, Args&&... args) {
+    ::new (location) T(static_cast<Args&&>(args)...);
+  }
 };
 
 } // namespace tzcnt_utils
