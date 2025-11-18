@@ -177,4 +177,46 @@ TEST_F(CATEGORY, initialize_with_params) {
     EXPECT_EQ(obj.value.size(), 5);
   }
 }
+
+struct move_only_type {
+  int value;
+
+  move_only_type(int input) : value(input) {}
+  move_only_type& operator=(move_only_type&&) = default;
+  move_only_type(move_only_type&&) = default;
+  ~move_only_type() = default;
+
+  // No default or copy constructor
+  move_only_type() = delete;
+  move_only_type(const move_only_type&) = delete;
+  move_only_type& operator=(const move_only_type&) = delete;
+};
+
+// Verify that the pool can hold an object that has no default constructor
+TEST_F(CATEGORY, no_default_constructor) {
+  BitmapObjectPool<move_only_type> pool;
+  {
+    auto obj = pool.acquire_scoped(5);
+    EXPECT_EQ(obj.value.value, 5);
+  }
+  {
+    auto obj = pool.acquire_scoped(999);
+    // we should get the same object again - not 999
+    EXPECT_EQ(obj.value.value, 5);
+  }
+}
+
+// Verify that perfect forwarding into the held object constructor works
+TEST_F(CATEGORY, move_construct) {
+  BitmapObjectPool<move_only_type> pool;
+  {
+    auto obj = pool.acquire_scoped(move_only_type{5});
+    EXPECT_EQ(obj.value.value, 5);
+  }
+  {
+    auto obj = pool.acquire_scoped(move_only_type{999});
+    // we should get the same object again - not 999
+    EXPECT_EQ(obj.value.value, 5);
+  }
+}
 #undef CATEGORY
