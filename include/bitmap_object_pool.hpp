@@ -162,7 +162,7 @@ public:
 
       // Medium path: advance to the next block and try again
       blockEnd += 64;
-      auto currCount = count.load(std::memory_order_relaxed);
+      auto currCount = count.load(std::memory_order_acquire);
       if (currCount >= blockEnd) {
         block = next_block(block);
       } else {
@@ -192,7 +192,7 @@ public:
   // call func(object). Objects that are currently in use by another thread
   // will not be processed.
   template <typename Fn> void for_each_available(Fn func) {
-    auto max = count.load(std::memory_order_relaxed);
+    auto max = count.load(std::memory_order_acquire);
     size_t i = 0;
     pool_block* block = data;
     while (i < max) {
