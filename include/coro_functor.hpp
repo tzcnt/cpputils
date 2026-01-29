@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Logan McDougall
+// Copyright (c) 2023-2026 Logan McDougall
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -170,17 +170,7 @@ public:
     Other.obj = nullptr;
   }
 
-  inline coro_functor& operator=(coro_functor&& Other) noexcept {
-    func = Other.func;
-    obj = Other.obj;
-#ifndef NDEBUG
-    Other.func = nullptr;
-#endif
-    Other.obj = nullptr;
-    return *this;
-  }
-
-  inline ~coro_functor() {
+  void clear() {
     uintptr_t mode = reinterpret_cast<uintptr_t>(obj);
     if (mode <= IS_FREE_FUNC) {
       return;
@@ -192,6 +182,18 @@ public:
     // cast_call_or_nothing will ignore the parameter
     memberFunc(obj, false);
   }
-};
 
+  inline coro_functor& operator=(coro_functor&& Other) noexcept {
+    clear();
+    func = Other.func;
+    obj = Other.obj;
+#ifndef NDEBUG
+    Other.func = nullptr;
+#endif
+    Other.obj = nullptr;
+    return *this;
+  }
+
+  inline ~coro_functor() { clear(); }
+};
 } // namespace tzcnt_utils
